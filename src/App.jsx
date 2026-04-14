@@ -1,214 +1,95 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import DropZone from './components/DropZone.jsx';
 import Slider from './components/Slider.jsx';
+import ColorPicker from './components/ColorPicker.jsx';
 import PreviewCanvas from './components/PreviewCanvas.jsx';
-import { RealtimeAnalyzer } from './engine/AudioAnalyzer.js';
-import { RenderLoop } from './engine/RenderLoop.js';
-import { ExportEngine } from './engine/ExportEngine.js';
-import { getTheme, getAllThemes } from './engine/ThemeRegistry.js';
+import { useAudioPlayer } from './hooks/useAudioPlayer.js';
+import { useExport } from './hooks/useExport.js';
+import { useThemeSettings } from './hooks/useThemeSettings.js';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
 import './styles/app.css';
 
-const DEFAULT_SETTINGS = {
-  bassSensitivity: 0.6,
-  trebleSensitivity: 0.5,
-  colorIntensity: 0.6,
-  effectStrength: 0.5,
-};
-
 export default function App() {
-  // Media state
   const [audioFile, setAudioFile] = useState(null);
   const [imageFile, setImageFile] = useState(null);
   const [bgImage, setBgImage] = useState(null);
+  const [showColors, setShowColors] = useState(false);
+  const [showTitle, setShowTitle] = useState(false);
 
-  // Theme & settings
-  const [themeId, setThemeId] = useState('lofi');
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-
-  // Playback state
-  const [isPlaying, setIsPlaying] = useState(false);
-
-  // Export state
-  const [exportState, setExportState] = useState({ status: 'idle', percent: 0, message: '', downloadUrl: null });
-
-  // Refs
   const canvasRef = useRef(null);
-  const audioElRef = useRef(null);
-  const analyzerRef = useRef(null);
-  const renderLoopRef = useRef(null);
-  const exportEngineRef = useRef(null);
 
-  // ---- Handle image load ----
+  const {
+    themeId, setThemeId, theme, settings,
+    updateSetting, updateColor, resetColors, resetAll,
+    themeMetas, currentMeta, FONT_OPTIONS,
+  } = useThemeSettings();
+
+  const { isPlaying, toggle, stop } = useAudioPlayer({
+    canvasRef, theme, settings, bgImage,
+  });
+
+  const { exportState, isExporting, startExport, cancelExport, resetExport } = useExport();
+
+  useKeyboardShortcuts({
+    onTogglePlay: useCallback(() => toggle(audioFile), [toggle, audioFile]),
+    onStop: stop,
+    isExporting,
+  });
+
   useEffect(() => {
-    if (!imageFile) {
-      setBgImage(null);
-      return;
-    }
+    if (!imageFile) { setBgImage(null); return; }
     const img = new Image();
+    const url = URL.createObjectURL(imageFile);
     img.onload = () => setBgImage(img);
-    img.src = URL.createObjectURL(imageFile);
-    return () => URL.revokeObjectURL(img.src);
+    img.src = url;
+    return () => URL.revokeObjectURL(url);
   }, [imageFile]);
 
-  // ---- Update render loop when theme/settings/bgImage changes ----
-  useEffect(() => {
-    if (renderLoopRef.current) {
-      renderLoopRef.current.setTheme(getTheme(themeId));
-    }
-  }, [themeId]);
+  const handleExport = useCallback(() => {
+    if (isPlaying) stop();
+    startExport({ audioFile, bgImage, theme, settings });
+  }, [audioFile, bgImage, theme, settings, isPlaying, stop, startExport]);
 
-  useEffect(() => {
-    if (renderLoopRef.current) {
-      renderLoopRef.current.setSettings(settings);
-    }
-  }, [settings]);
-
-  useEffect(() => {
-    if (renderLoopRef.current) {
-      renderLoopRef.current.setBackgroundImage(bgImage);
-    }
-  }, [bgImage]);
-
-  // ---- When theme changes, apply its default settings ----
-  useEffect(() => {
-    const theme = getTheme(themeId);
-    if (theme.defaultSettings) {
-      setSettings({ ...DEFAULT_SETTINGS, ...theme.defaultSettings });
-    }
-  }, [themeId]);
-
-  // ---- Play / Stop ----
-  const handlePlay = useCallback(async () => {
-    if (!audioFile) return;
-
-    if (isPlaying) {
-      // Stop
-      if (audioElRef.current) {
-        audioElRef.current.pause();
-        audioElRef.current.currentTime = 0;
-      }
-      renderLoopRef.current?.stop();
-      setIsPlaying(false);
-      return;
-    }
-
-    // Create audio element
-    if (!audioElRef.current) {
-      audioElRef.current = new Audio();
-    }
-    const audioEl = audioElRef.current;
-    audioEl.src = URL.createObjectURL(audioFile);
-
-    // Init analyzer
-    if (!analyzerRef.current) {
-      analyzerRef.current = new RealtimeAnalyzer();
-    }
-    await analyzerRef.current.init(audioEl);
-    analyzerRef.current.resume();
-
-    // Init render loop
-    const canvas = canvasRef.current.getCanvas();
-    const theme = getTheme(themeId);
-
-    if (renderLoopRef.current) {
-      renderLoopRef.current.destroy();
-    }
-    renderLoopRef.current = new RenderLoop(canvas, theme, settings);
-    renderLoopRef.current.setBackgroundImage(bgImage);
-
-    // Start playback
-    await audioEl.play();
-    renderLoopRef.current.startPreview(() => analyzerRef.current.getData());
-    setIsPlaying(true);
-
-    // Auto-stop when audio ends
-    audioEl.onended = () => {
-      renderLoopRef.current?.stop();
-      setIsPlaying(false);
-    };
-  }, [audioFile, isPlaying, themeId, settings, bgImage]);
-
-  // ---- Export ----
-  const handleExport = useCallback(async () => {
-    if (!audioFile) return;
-
-    // Stop preview if playing
-    if (isPlaying) {
-      audioElRef.current?.pause();
-      renderLoopRef.current?.stop();
-      setIsPlaying(false);
-    }
-
-    setExportState({ status: 'rendering', percent: 0, message: 'Starting export...', downloadUrl: null });
-
-    const engine = new ExportEngine();
-    exportEngineRef.current = engine;
-
-    try {
-      const downloadUrl = await engine.run({
-        audioFile,
-        backgroundImage: bgImage,
-        theme: getTheme(themeId),
-        settings,
-        fps: 30,
-        width: 1920,
-        height: 1080,
-        onProgress: (percent, message) => {
-          setExportState({ status: 'rendering', percent, message, downloadUrl: null });
-        },
-      });
-
-      setExportState({ status: 'done', percent: 100, message: 'Export complete!', downloadUrl });
-    } catch (err) {
-      if (err.message === 'Export aborted') {
-        setExportState({ status: 'idle', percent: 0, message: '', downloadUrl: null });
-      } else {
-        setExportState({ status: 'error', percent: 0, message: `Error: ${err.message}`, downloadUrl: null });
-      }
-    }
-  }, [audioFile, bgImage, themeId, settings, isPlaying]);
-
-  const handleCancelExport = useCallback(() => {
-    exportEngineRef.current?.abort();
-    setExportState({ status: 'idle', percent: 0, message: '', downloadUrl: null });
-  }, []);
-
-  const handleResetExport = useCallback(() => {
-    setExportState({ status: 'idle', percent: 0, message: '', downloadUrl: null });
-  }, []);
-
-  const themes = getAllThemes();
-  const isExporting = exportState.status === 'rendering';
+  const handleRefreshSession = useCallback(() => {
+    if (isPlaying) stop();
+    setAudioFile(null);
+    setImageFile(null);
+    setBgImage(null);
+    resetAll();
+    resetExport();
+  }, [isPlaying, stop, resetAll, resetExport]);
 
   return (
     <div className="app-layout">
-      {/* Header */}
       <header className="app-header">
         <div className="app-logo">
-          <span className="logo-icon">◈</span>
+          <span className="logo-icon">&#9674;</span>
           <span className="logo-text">Visualizer Studio</span>
         </div>
-        <div className="header-badge">v1.0 MVP</div>
+        <div className="header-right">
+          <span className="shortcut-hint">Space: Play/Pause</span>
+          <span className="shortcut-hint">Esc: Stop</span>
+          <div className="header-badge">v2.0</div>
+        </div>
       </header>
 
       <div className="app-body">
-        {/* ============ LEFT PANEL ============ */}
         <aside className="left-panel">
           {/* Media Inputs */}
           <section className="panel">
             <div className="panel-header">Media Input</div>
-            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="panel-body">
               <DropZone
                 label="Drop audio file (MP3, WAV)"
                 accept="audio/*,.mp3,.wav,.ogg,.flac"
-                icon="🎵"
+                icon="&#127925;"
                 onFileSelect={setAudioFile}
                 currentFile={audioFile}
               />
               <DropZone
                 label="Drop background image (JPG, PNG)"
                 accept="image/*,.jpg,.jpeg,.png,.webp"
-                icon="🖼"
+                icon="&#128444;"
                 onFileSelect={setImageFile}
                 currentFile={imageFile}
               />
@@ -218,114 +99,147 @@ export default function App() {
           {/* Theme Selector */}
           <section className="panel">
             <div className="panel-header">Theme / Preset</div>
-            <div style={{ padding: 16 }}>
-              <select
-                value={themeId}
-                onChange={(e) => setThemeId(e.target.value)}
-                disabled={isExporting}
-              >
-                {themes.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                  </option>
+            <div className="panel-body">
+              <div className="theme-grid">
+                {themeMetas.map((t) => (
+                  <button
+                    key={t.id}
+                    className={`theme-card ${themeId === t.id ? 'active' : ''}`}
+                    onClick={() => setThemeId(t.id)}
+                    disabled={isExporting}
+                  >
+                    <div className="theme-card-swatches">
+                      {t.colorSlots.slice(0, 3).map((slot) => (
+                        <span key={slot.id} className="theme-swatch" style={{ background: slot.default }} />
+                      ))}
+                    </div>
+                    <span className="theme-card-name">{t.name}</span>
+                  </button>
                 ))}
-              </select>
-              <p style={{
-                fontSize: 11,
-                color: 'var(--text-muted)',
-                marginTop: 8,
-                lineHeight: 1.5,
-              }}>
-                {getTheme(themeId).description}
-              </p>
+              </div>
+              {currentMeta && <p className="theme-description">{currentMeta.description}</p>}
             </div>
           </section>
 
-          {/* Settings */}
+          {/* Audio Reactive + Visual Scale */}
           <section className="panel">
-            <div className="panel-header">Audio Reactive Settings</div>
-            <div style={{ padding: 16 }}>
-              <Slider
-                label="Bass Sensitivity"
-                value={settings.bassSensitivity}
-                onChange={(v) => setSettings((s) => ({ ...s, bassSensitivity: v }))}
-              />
-              <Slider
-                label="Treble Reactivity"
-                value={settings.trebleSensitivity}
-                onChange={(v) => setSettings((s) => ({ ...s, trebleSensitivity: v }))}
-              />
-              <Slider
-                label="Color Intensity"
-                value={settings.colorIntensity}
-                onChange={(v) => setSettings((s) => ({ ...s, colorIntensity: v }))}
-              />
-              <Slider
-                label="Effect Strength"
-                value={settings.effectStrength}
-                onChange={(v) => setSettings((s) => ({ ...s, effectStrength: v }))}
-              />
+            <div className="panel-header">Audio Reactive</div>
+            <div className="panel-body">
+              <Slider label="Bass Sensitivity" value={settings.bassSensitivity} onChange={(v) => updateSetting('bassSensitivity', v)} />
+              <Slider label="Treble Reactivity" value={settings.trebleSensitivity} onChange={(v) => updateSetting('trebleSensitivity', v)} />
+              <Slider label="Color Intensity" value={settings.colorIntensity} onChange={(v) => updateSetting('colorIntensity', v)} />
+              <Slider label="Effect Strength" value={settings.effectStrength} onChange={(v) => updateSetting('effectStrength', v)} />
+              <div className="divider" />
+              <Slider label="Waveform Thickness" value={settings.waveformScale ?? 0.5} onChange={(v) => updateSetting('waveformScale', v)} />
+              <Slider label="Bar Thickness" value={settings.barScale ?? 0.5} onChange={(v) => updateSetting('barScale', v)} />
             </div>
+          </section>
+
+          {/* Color Palette */}
+          <section className="panel">
+            <div className="panel-header panel-header-toggle" onClick={() => setShowColors(!showColors)}>
+              <span>Color Palette</span>
+              <span className="toggle-icon">{showColors ? '\u25B2' : '\u25BC'}</span>
+            </div>
+            {showColors && currentMeta?.colorSlots && (
+              <div className="panel-body">
+                {currentMeta.colorSlots.map((slot) => (
+                  <ColorPicker
+                    key={slot.id}
+                    label={slot.label}
+                    value={settings.colors?.[slot.id] || slot.default}
+                    onChange={(v) => updateColor(slot.id, v)}
+                  />
+                ))}
+                <button className="btn btn-ghost" onClick={resetColors}>Reset to Defaults</button>
+              </div>
+            )}
+          </section>
+
+          {/* Song Info Overlay */}
+          <section className="panel">
+            <div className="panel-header panel-header-toggle" onClick={() => setShowTitle(!showTitle)}>
+              <span>Song Info Overlay</span>
+              <span className="toggle-icon">{showTitle ? '\u25B2' : '\u25BC'}</span>
+            </div>
+            {showTitle && (
+              <div className="panel-body">
+                <label className="input-row">
+                  <span className="input-label">Show on video</span>
+                  <input type="checkbox" className="toggle-checkbox" checked={settings.showTitle || false} onChange={(e) => updateSetting('showTitle', e.target.checked)} />
+                </label>
+                <input type="text" className="text-input" placeholder="Song title" value={settings.songTitle || ''} onChange={(e) => updateSetting('songTitle', e.target.value)} />
+                <input type="text" className="text-input" placeholder="Artist name" value={settings.artistName || ''} onChange={(e) => updateSetting('artistName', e.target.value)} />
+                <div className="select-row">
+                  <span className="input-label">Font</span>
+                  <select value={settings.titleFont || 'Outfit'} onChange={(e) => updateSetting('titleFont', e.target.value)}>
+                    {FONT_OPTIONS.map((f) => (
+                      <option key={f.id} value={f.id} style={{ fontFamily: f.id }}>{f.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="select-row">
+                  <span className="input-label">Position</span>
+                  <select value={settings.titlePosition || 'bottom-left'} onChange={(e) => updateSetting('titlePosition', e.target.value)}>
+                    <option value="bottom-left">Bottom Left</option>
+                    <option value="bottom-center">Bottom Center</option>
+                    <option value="top-left">Top Left</option>
+                    <option value="center">Center</option>
+                  </select>
+                </div>
+                <div className="select-row">
+                  <span className="input-label">Display</span>
+                  <select value={settings.titleDisplay || 'always'} onChange={(e) => updateSetting('titleDisplay', e.target.value)}>
+                    <option value="always">Always visible</option>
+                    <option value="fade">Fade in/out (0-10s)</option>
+                    <option value="hidden">Hidden</option>
+                  </select>
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Actions */}
           <section className="panel">
             <div className="panel-header">Actions</div>
-            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div className="panel-body actions-body">
               <button
                 className={`btn ${isPlaying ? 'btn-danger' : 'btn-secondary'}`}
-                onClick={handlePlay}
+                onClick={() => toggle(audioFile)}
                 disabled={!audioFile || isExporting}
               >
-                {isPlaying ? '■  Stop Preview' : '▶  Play Preview'}
+                {isPlaying ? 'Stop Preview' : 'Play Preview'}
               </button>
 
               {!isExporting && exportState.status !== 'done' && (
-                <button
-                  className="btn btn-primary"
-                  onClick={handleExport}
-                  disabled={!audioFile}
-                >
-                  ⬡  Generate Video
+                <button className="btn btn-primary" onClick={handleExport} disabled={!audioFile}>
+                  Generate Video
                 </button>
               )}
 
               {isExporting && (
-                <button className="btn btn-danger" onClick={handleCancelExport}>
-                  ✕  Cancel Export
-                </button>
+                <button className="btn btn-danger" onClick={cancelExport}>Cancel Export</button>
               )}
 
               {exportState.status === 'done' && (
-                <button className="btn btn-secondary" onClick={handleResetExport}>
-                  ↺  New Export
-                </button>
+                <button className="btn btn-secondary" onClick={resetExport}>New Export</button>
               )}
+
+              <div className="divider" />
+              <button className="btn btn-ghost" onClick={handleRefreshSession}>
+                Reset Session
+              </button>
             </div>
           </section>
         </aside>
 
-        {/* ============ RIGHT PANEL ============ */}
         <main className="right-panel">
           <div className="preview-label">Preview</div>
-          <PreviewCanvas
-            ref={canvasRef}
-            width={1920}
-            height={1080}
-            exportState={exportState}
-          />
-
-          {/* Audio info bar */}
+          <PreviewCanvas ref={canvasRef} width={1920} height={1080} exportState={exportState} isActive={isPlaying || isExporting} />
           <div className="info-bar">
-            <span>
-              {audioFile ? `🎵 ${audioFile.name}` : 'No audio loaded'}
-            </span>
-            <span>
-              {imageFile ? `🖼 ${imageFile.name}` : 'No background'}
-            </span>
-            <span>
-              Theme: {getTheme(themeId).name}
-            </span>
+            <span>{audioFile ? audioFile.name : 'No audio loaded'}</span>
+            <span>{imageFile ? imageFile.name : 'No background'}</span>
+            <span>Theme: {currentMeta?.name || 'Unknown'}</span>
           </div>
         </main>
       </div>

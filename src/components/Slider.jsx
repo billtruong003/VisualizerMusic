@@ -4,28 +4,10 @@ export default function Slider({ label, value, onChange, min = 0, max = 1, step 
   const percent = ((value - min) / (max - min)) * 100;
 
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 6,
-      }}>
-        <span style={{
-          fontSize: 12,
-          color: 'var(--text-secondary)',
-          fontWeight: 500,
-          letterSpacing: '0.3px',
-        }}>
-          {label}
-        </span>
-        <span style={{
-          fontSize: 11,
-          color: 'var(--text-muted)',
-          fontFamily: 'var(--font-mono)',
-        }}>
-          {value.toFixed(2)}
-        </span>
+    <div className="slider-row">
+      <div className="slider-header">
+        <span className="slider-label">{label}</span>
+        <span className="slider-value">{value.toFixed(2)}</span>
       </div>
       <input
         type="range"

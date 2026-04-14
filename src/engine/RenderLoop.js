@@ -1,6 +1,10 @@
 /**
  * RenderLoop — Drives the canvas render in both preview and export modes
+ *
+ * Now includes song title/artist overlay rendered AFTER theme (theme-independent).
  */
+
+import { drawTitleOverlay } from '../utils/color.js';
 
 export class RenderLoop {
   constructor(canvas, theme, settings) {
@@ -28,10 +32,6 @@ export class RenderLoop {
     this.backgroundImage = img;
   }
 
-  /**
-   * Start the realtime preview loop
-   * @param {Function} getAudioData — () => AudioData from RealtimeAnalyzer
-   */
   startPreview(getAudioData) {
     this.running = true;
     this.startTime = performance.now();
@@ -42,16 +42,16 @@ export class RenderLoop {
 
       const audioData = getAudioData();
       const time = (performance.now() - this.startTime) / 1000;
+      const w = this.canvas.width;
+      const h = this.canvas.height;
 
-      this.theme.render(
-        this.ctx,
-        audioData,
-        this.settings,
-        time,
-        this.backgroundImage,
-        this.canvas.width,
-        this.canvas.height
-      );
+      // Theme render
+      this.theme.render(this.ctx, audioData, this.settings, time, this.backgroundImage, w, h);
+
+      // Title overlay (theme-independent, renders on top)
+      if (this.settings.showTitle && (this.settings.songTitle || this.settings.artistName)) {
+        drawTitleOverlay(this.ctx, this.settings, time, Infinity, w, h);
+      }
 
       this.rafId = requestAnimationFrame(loop);
     };
@@ -59,19 +59,13 @@ export class RenderLoop {
     loop();
   }
 
-  /**
-   * Render a single frame at a specific time (used for export)
-   */
   renderFrame(audioData, time) {
-    this.theme.render(
-      this.ctx,
-      audioData,
-      this.settings,
-      time,
-      this.backgroundImage,
-      this.canvas.width,
-      this.canvas.height
-    );
+    const w = this.canvas.width;
+    const h = this.canvas.height;
+    this.theme.render(this.ctx, audioData, this.settings, time, this.backgroundImage, w, h);
+    if (this.settings.showTitle && (this.settings.songTitle || this.settings.artistName)) {
+      drawTitleOverlay(this.ctx, this.settings, time, Infinity, w, h);
+    }
   }
 
   stop() {

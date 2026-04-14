@@ -18,9 +18,9 @@ import { promisify } from 'util';
 
 const execAsync = promisify(exec);
 
-// FFmpeg binary path — hardcoded for Windows since PATH may not be set
+// FFmpeg binary path — relative to project root
 const FFMPEG_BIN = process.platform === 'win32'
-  ? 'C:\\ffmpeg\\ffmpeg-8.1-essentials_build\\bin\\ffmpeg.exe'
+  ? path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ffmpeg-8.1-essentials_build', 'bin', 'ffmpeg.exe')
   : 'ffmpeg';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -135,7 +135,7 @@ const frameUpload = multer({
   }),
 });
 
-app.post('/api/export/:sessionId/frames', frameUpload.array('frames', 60), (req, res) => {
+app.post('/api/export/:sessionId/frames', frameUpload.array('frames', 100), (req, res) => {
   const session = exportSessions.get(req.params.sessionId);
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
@@ -170,8 +170,9 @@ app.post('/api/export/:sessionId/finalize', async (req, res) => {
       `-i "${path.join(session.framesDir, 'frame_%06d.jpg')}"`,
       session.audioPath ? `-i "${session.audioPath}"` : '',
       '-c:v libx264',
-      '-preset medium',
-      '-crf 18',
+      '-preset fast',
+      '-crf 20',
+      '-tune fastdecode',
       '-pix_fmt yuv420p',
       session.audioPath ? '-c:a aac -b:a 192k' : '',
       '-shortest',
@@ -185,12 +186,22 @@ app.post('/api/export/:sessionId/finalize', async (req, res) => {
     const downloadUrl = `/exports/${session.sessionId}/output.mp4`;
     res.json({ downloadUrl });
 
-    // Cleanup frames after a delay (keep mp4)
+    // Cleanup frames immediately (keep mp4 for download)
     setTimeout(() => {
       try {
         fs.rmSync(session.framesDir, { recursive: true, force: true });
       } catch (e) { /* ok */ }
-    }, 5000);
+    }, 3000);
+
+    // Remove session from memory (mp4 still accessible via static serving)
+    exportSessions.delete(req.params.sessionId);
+
+    // Auto-delete mp4 after 1 hour
+    setTimeout(() => {
+      try {
+        fs.rmSync(session.sessionDir, { recursive: true, force: true });
+      } catch (e) { /* ok */ }
+    }, 3600000);
   } catch (err) {
     console.error('[FFmpeg Error]', err.message);
     res.status(500).json({ error: 'FFmpeg encoding failed', details: err.message });

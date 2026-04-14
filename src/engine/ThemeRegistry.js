@@ -1,45 +1,61 @@
 /**
- * ThemeRegistry — Central registry for visualizer themes
- * 
- * Adding a new theme:
- *   1. Create a file in /themes/ that exports an object matching ThemeModule interface
- *   2. Import and register it here
- * 
- * ThemeModule interface:
- *   {
- *     id: string,
- *     name: string,
- *     description: string,
- *     defaultSettings: { bassSensitivity, trebleSensitivity, colorIntensity, effectStrength },
- *     init(ctx, width, height): void,
- *     render(ctx, audioData, settings, time, backgroundImage): void,
- *     destroy(): void,
- *   }
+ * ThemeRegistry — Central registry for visualizer themes (Factory Pattern)
+ *
+ * Each theme exports:
+ *   - meta: { id, name, description, colorSlots, defaultSettings }
+ *   - create(): ThemeInstance with { init, render, destroy }
  */
 
-import { lofiTheme } from '../themes/lofi.js';
-import { cyberpunkTheme } from '../themes/cyberpunk.js';
-import { ambientTheme } from '../themes/ambient.js';
+import { lofiMeta, createLofiTheme } from '../themes/lofi.js';
+import { cyberpunkMeta, createCyberpunkTheme } from '../themes/cyberpunk.js';
+import { ambientMeta, createAmbientTheme } from '../themes/ambient.js';
+import { retrowaveMeta, createRetrowaveTheme } from '../themes/retrowave.js';
+import { minimalMeta, createMinimalTheme } from '../themes/minimal.js';
+import { neonPulseMeta, createNeonPulseTheme } from '../themes/neonPulse.js';
+import { galaxyMeta, createGalaxyTheme } from '../themes/galaxy.js';
+import { watercolorMeta, createWatercolorTheme } from '../themes/watercolor.js';
 
-const themes = new Map();
+const registry = new Map();
 
-function register(theme) {
-  themes.set(theme.id, theme);
+function register(meta, factory) {
+  registry.set(meta.id, { meta, factory });
 }
 
-// Register built-in themes
-register(lofiTheme);
-register(cyberpunkTheme);
-register(ambientTheme);
+// Register all built-in themes
+register(lofiMeta, createLofiTheme);
+register(cyberpunkMeta, createCyberpunkTheme);
+register(ambientMeta, createAmbientTheme);
+register(retrowaveMeta, createRetrowaveTheme);
+register(minimalMeta, createMinimalTheme);
+register(neonPulseMeta, createNeonPulseTheme);
+register(galaxyMeta, createGalaxyTheme);
+register(watercolorMeta, createWatercolorTheme);
 
-export function getTheme(id) {
-  return themes.get(id) || lofiTheme;
+/**
+ * Create a fresh theme instance (own state, no shared mutation)
+ */
+export function createTheme(id) {
+  const entry = registry.get(id);
+  return entry ? entry.factory() : registry.values().next().value.factory();
 }
 
-export function getAllThemes() {
-  return Array.from(themes.values());
+/**
+ * Get theme metadata without creating an instance
+ */
+export function getThemeMeta(id) {
+  return registry.get(id)?.meta || null;
 }
 
-export function registerTheme(theme) {
-  register(theme);
+/**
+ * Get all theme metadata for UI listing
+ */
+export function getAllThemeMetas() {
+  return Array.from(registry.values()).map(e => e.meta);
+}
+
+/**
+ * Register a custom theme at runtime (plugin support)
+ */
+export function registerTheme(meta, factory) {
+  register(meta, factory);
 }
