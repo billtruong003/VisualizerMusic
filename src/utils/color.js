@@ -138,17 +138,27 @@ export function drawTitleOverlay(ctx, settings, time, duration, w, h) {
   ctx.save();
   ctx.globalAlpha = alpha * 0.95;
 
-  // Position
+  // Position — 3x3 grid
+  const margin = Math.round(w / 32);
+  const topY = margin + Math.round(w / 50);
+  const midY = h / 2 - 10;
+  const botY = h - margin - Math.round(w / 80);
+  const leftX = margin;
+  const cenX = w / 2;
+  const rightX = w - margin;
+
   let x, y, align;
   switch (titlePosition) {
-    case 'center':
-      x = w / 2; y = h / 2 - 10; align = 'center'; break;
-    case 'bottom-center':
-      x = w / 2; y = h - 90; align = 'center'; break;
-    case 'top-left':
-      x = 60; y = 70; align = 'left'; break;
-    default: // bottom-left
-      x = 60; y = h - 90; align = 'left'; break;
+    case 'top-left':        x = leftX;  y = topY; align = 'left';   break;
+    case 'top-center':      x = cenX;   y = topY; align = 'center'; break;
+    case 'top-right':       x = rightX; y = topY; align = 'right';  break;
+    case 'middle-left':     x = leftX;  y = midY; align = 'left';   break;
+    case 'center':          x = cenX;   y = midY; align = 'center'; break;
+    case 'middle-right':    x = rightX; y = midY; align = 'right';  break;
+    case 'bottom-center':   x = cenX;   y = botY; align = 'center'; break;
+    case 'bottom-right':    x = rightX; y = botY; align = 'right';  break;
+    default: /* bottom-left */
+                            x = leftX;  y = botY; align = 'left';   break;
   }
 
   ctx.textAlign = align;

@@ -62,6 +62,11 @@ export function useAudioPlayer({ canvasRef, theme, settings, bgImage }) {
     renderLoopRef.current = new RenderLoop(canvas, theme, settings);
     renderLoopRef.current.setBackgroundImage(bgImage);
 
+    // Resume background video if any (paused by export or manual stop)
+    if (bgImage && typeof bgImage.play === 'function' && bgImage.paused) {
+      bgImage.play().catch(() => {});
+    }
+
     // Start
     await audioEl.play();
     renderLoopRef.current.startPreview(() => analyzerRef.current.getData());

@@ -12,6 +12,31 @@
 import { OfflineAnalyzer } from './AudioAnalyzer.js';
 import { drawTitleOverlay } from '../utils/color.js';
 
+function isVideoElement(el) {
+  return typeof HTMLVideoElement !== 'undefined' && el instanceof HTMLVideoElement;
+}
+
+function seekVideo(video, time) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      video.removeEventListener('seeked', finish);
+      resolve();
+    };
+    video.addEventListener('seeked', finish);
+    try {
+      video.currentTime = time;
+    } catch (e) {
+      finish();
+      return;
+    }
+    // Safety net — some browsers may not fire 'seeked' on tiny deltas
+    setTimeout(finish, 150);
+  });
+}
+
 export class ExportEngine {
   constructor() {
     this.aborted = false;
@@ -65,6 +90,13 @@ export class ExportEngine {
     if (this.aborted) throw new Error('Export aborted');
     onProgress(10, 'Rendering frames...');
 
+    // Prepare video background (seek mode — pause any ongoing playback)
+    const videoBg = isVideoElement(backgroundImage) ? backgroundImage : null;
+    if (videoBg) {
+      videoBg.pause();
+      videoBg.loop = true;
+    }
+
     // 6. Render frames with concurrent upload pipeline
     const BATCH_SIZE = 60;
     const MAX_CONCURRENT_UPLOADS = 3;
@@ -77,6 +109,12 @@ export class ExportEngine {
 
       const audioData = analyzer.getFrame(frame);
       const time = frame / fps;
+
+      // Seek video background to matching timestamp (loop)
+      if (videoBg && videoBg.duration > 0) {
+        const targetTime = time % videoBg.duration;
+        await seekVideo(videoBg, targetTime);
+      }
 
       // Render theme
       theme.render(ctx, audioData, settings, time, backgroundImage, width, height);

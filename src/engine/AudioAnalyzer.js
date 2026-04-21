@@ -10,6 +10,19 @@
 
 const FFT_SIZE = 2048;
 
+// Match Web Audio AnalyserNode defaults so offline export bars match live preview.
+// AnalyserNode maps magnitudes in [MIN_DECIBELS, MAX_DECIBELS] to [0, 255] bytes.
+const MIN_DECIBELS = -100;
+const MAX_DECIBELS = -30;
+const DB_RANGE = MAX_DECIBELS - MIN_DECIBELS;
+
+function magToByte(mag) {
+  if (mag <= 0) return 0;
+  const dB = 20 * Math.log10(mag);
+  const scaled = ((dB - MIN_DECIBELS) / DB_RANGE) * 255;
+  return Math.max(0, Math.min(255, scaled));
+}
+
 // ============================================================
 // Radix-2 Cooley-Tukey FFT (in-place)
 // ~180x faster than the old manual DFT for 2048 samples
@@ -233,12 +246,13 @@ export class OfflineAnalyzer {
       // Radix-2 FFT
       fft(real, imag);
 
-      // Magnitude → smoothed → 0-255 frequency data
+      // Magnitude → dB-mapped byte (matches AnalyserNode.getByteFrequencyData) → smoothed.
+      // AnalyserNode smooths magnitudes BEFORE dB conversion, but applying smoothing in
+      // byte space is close enough and keeps values stable for the temporal envelope.
       const frequencyData = new Uint8Array(binCount);
       for (let k = 0; k < binCount; k++) {
         const mag = Math.sqrt(real[k] * real[k] + imag[k] * imag[k]) / windowSize;
-        const raw = mag * 512;
-        // Temporal smoothing (same as Web Audio AnalyserNode)
+        const raw = magToByte(mag);
         smoothedFreq[k] = SMOOTHING * smoothedFreq[k] + (1 - SMOOTHING) * raw;
         frequencyData[k] = Math.max(0, Math.min(255, Math.floor(smoothedFreq[k])));
       }
@@ -299,7 +313,7 @@ export class OfflineAnalyzer {
     const frequencyData = new Uint8Array(binCount);
     for (let k = 0; k < binCount; k++) {
       const mag = Math.sqrt(real[k] * real[k] + imag[k] * imag[k]) / windowSize;
-      frequencyData[k] = Math.max(0, Math.min(255, Math.floor(mag * 512)));
+      frequencyData[k] = Math.floor(magToByte(mag));
     }
 
     const timeDomainData = new Uint8Array(binCount);

@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "code-review-graph": {
+      "command": "code-review-graph",
+      "args": [
+        "serve"
+      ],
+      "type": "stdio"
+    },
+    "mempalace": {
+      "command": "mempalace",
+      "args": [
+        "mcp"
+      ],
+      "type": "stdio",
+      "env": {
+        "PYTHONIOENCODING": "utf-8",
+        "MEMPALACE_PALACE": "c:/Users/ADMIN/Downloads/music-visualizer-studio/music-visualizer"
+      }
+    }
+  }
+}

@@ -38,8 +38,35 @@ export default function App() {
 
   useEffect(() => {
     if (!imageFile) { setBgImage(null); return; }
-    const img = new Image();
     const url = URL.createObjectURL(imageFile);
+    const isVideo = imageFile.type.startsWith('video/');
+
+    if (isVideo) {
+      const video = document.createElement('video');
+      video.src = url;
+      video.loop = true;
+      video.muted = true;
+      video.playsInline = true;
+      video.crossOrigin = 'anonymous';
+      video.preload = 'auto';
+      const onReady = () => {
+        // Expose intrinsic dims via .width/.height so theme code that reads bgImage.width
+        // (written for HTMLImageElement) keeps working with HTMLVideoElement.
+        if (video.videoWidth) video.width = video.videoWidth;
+        if (video.videoHeight) video.height = video.videoHeight;
+        video.play().catch(() => { /* autoplay blocked — fine for drawImage */ });
+        setBgImage(video);
+      };
+      video.addEventListener('loadeddata', onReady, { once: true });
+      return () => {
+        video.removeEventListener('loadeddata', onReady);
+        video.pause();
+        video.src = '';
+        URL.revokeObjectURL(url);
+      };
+    }
+
+    const img = new Image();
     img.onload = () => setBgImage(img);
     img.src = url;
     return () => URL.revokeObjectURL(url);
@@ -87,8 +114,8 @@ export default function App() {
                 currentFile={audioFile}
               />
               <DropZone
-                label="Drop background image (JPG, PNG)"
-                accept="image/*,.jpg,.jpeg,.png,.webp"
+                label="Drop image or video loop (JPG, PNG, MP4, WebM)"
+                accept="image/*,video/*,.jpg,.jpeg,.png,.webp,.mp4,.webm,.mov"
                 icon="&#128444;"
                 onFileSelect={setImageFile}
                 currentFile={imageFile}
@@ -181,10 +208,21 @@ export default function App() {
                 <div className="select-row">
                   <span className="input-label">Position</span>
                   <select value={settings.titlePosition || 'bottom-left'} onChange={(e) => updateSetting('titlePosition', e.target.value)}>
-                    <option value="bottom-left">Bottom Left</option>
-                    <option value="bottom-center">Bottom Center</option>
-                    <option value="top-left">Top Left</option>
-                    <option value="center">Center</option>
+                    <optgroup label="Top">
+                      <option value="top-left">Top Left</option>
+                      <option value="top-center">Top Center</option>
+                      <option value="top-right">Top Right</option>
+                    </optgroup>
+                    <optgroup label="Middle">
+                      <option value="middle-left">Middle Left</option>
+                      <option value="center">Center</option>
+                      <option value="middle-right">Middle Right</option>
+                    </optgroup>
+                    <optgroup label="Bottom">
+                      <option value="bottom-left">Bottom Left</option>
+                      <option value="bottom-center">Bottom Center</option>
+                      <option value="bottom-right">Bottom Right</option>
+                    </optgroup>
                   </select>
                 </div>
                 <div className="select-row">

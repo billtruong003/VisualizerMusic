@@ -14,6 +14,9 @@ import { minimalMeta, createMinimalTheme } from '../themes/minimal.js';
 import { neonPulseMeta, createNeonPulseTheme } from '../themes/neonPulse.js';
 import { galaxyMeta, createGalaxyTheme } from '../themes/galaxy.js';
 import { watercolorMeta, createWatercolorTheme } from '../themes/watercolor.js';
+import { waveTunnelMeta, createWaveTunnelTheme } from '../themes/waveTunnel.js';
+import { particleStormMeta, createParticleStormTheme } from '../themes/particleStorm.js';
+import { auroraMeta, createAuroraTheme } from '../themes/aurora.js';
 
 const registry = new Map();
 
@@ -30,6 +33,9 @@ register(minimalMeta, createMinimalTheme);
 register(neonPulseMeta, createNeonPulseTheme);
 register(galaxyMeta, createGalaxyTheme);
 register(watercolorMeta, createWatercolorTheme);
+register(waveTunnelMeta, createWaveTunnelTheme);
+register(particleStormMeta, createParticleStormTheme);
+register(auroraMeta, createAuroraTheme);
 
 /**
  * Create a fresh theme instance (own state, no shared mutation)
