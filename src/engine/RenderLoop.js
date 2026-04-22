@@ -5,6 +5,7 @@
  */
 
 import { drawTitleOverlay } from '../utils/color.js';
+import { drawSubtitles } from '../utils/subtitles.js';
 
 export class RenderLoop {
   constructor(canvas, theme, settings) {
@@ -53,6 +54,11 @@ export class RenderLoop {
         drawTitleOverlay(this.ctx, this.settings, time, Infinity, w, h);
       }
 
+      // Subtitles
+      if (this.settings.showSubtitles && this.settings.subtitleData) {
+        drawSubtitles(this.ctx, this.settings.subtitleData, time, w, h, this.settings.showSecondaryLang);
+      }
+
       this.rafId = requestAnimationFrame(loop);
     };
 
@@ -65,6 +71,9 @@ export class RenderLoop {
     this.theme.render(this.ctx, audioData, this.settings, time, this.backgroundImage, w, h);
     if (this.settings.showTitle && (this.settings.songTitle || this.settings.artistName)) {
       drawTitleOverlay(this.ctx, this.settings, time, Infinity, w, h);
+    }
+    if (this.settings.showSubtitles && this.settings.subtitleData) {
+      drawSubtitles(this.ctx, this.settings.subtitleData, time, w, h, this.settings.showSecondaryLang);
     }
   }
 

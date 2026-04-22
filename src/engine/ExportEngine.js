@@ -3,14 +3,17 @@
  *
  * Speed optimizations:
  *  1. Pre-computes ALL audio data upfront (FFT once, not per-frame)
- *  2. Double-buffer: renders to canvas A while converting canvas B to blob
+ *  2. Pipelined blob conversion: convertToBlob runs on a browser worker thread
+ *     while the main thread renders the next frame (spec guarantees snapshot-at-call).
  *  3. Concurrent uploads: up to 3 batches uploading simultaneously
  *  4. Larger batch size (60 frames)
- *  5. JPEG quality 0.85 (smaller files, faster upload)
+ *  5. JPEG quality 0.82 (balance of quality + upload size)
+ *  6. Video background: skip redundant seeks when currentTime already matches.
  */
 
 import { OfflineAnalyzer } from './AudioAnalyzer.js';
 import { drawTitleOverlay } from '../utils/color.js';
+import { drawSubtitles } from '../utils/subtitles.js';
 
 function isVideoElement(el) {
   return typeof HTMLVideoElement !== 'undefined' && el instanceof HTMLVideoElement;
@@ -97,12 +100,39 @@ export class ExportEngine {
       videoBg.loop = true;
     }
 
-    // 6. Render frames with concurrent upload pipeline
+    // 6. Render frames with pipelined blob conversion + concurrent upload
     const BATCH_SIZE = 60;
     const MAX_CONCURRENT_UPLOADS = 3;
+    const BLOB_PIPELINE_DEPTH = 4; // in-flight convertToBlob calls
+    const JPEG_QUALITY = 0.82;
+    const SEEK_TOLERANCE = 0.5 / fps; // skip seek if already this close
     let batch = [];
     let batchIndex = 0;
     const uploadQueue = []; // track in-flight uploads
+    const pendingBlobs = []; // in-flight convertToBlob promises {frame, promise}
+
+    const flushBatch = async (isFinal) => {
+      // Wait if too many concurrent uploads
+      while (uploadQueue.length >= MAX_CONCURRENT_UPLOADS) {
+        await Promise.race(uploadQueue);
+      }
+      const currentBatch = batch;
+      const currentBatchIndex = batchIndex;
+      batch = [];
+      batchIndex++;
+      const uploadPromise = this._uploadBatch(sessionId, currentBatch, currentBatchIndex)
+        .then(() => {
+          const idx = uploadQueue.indexOf(uploadPromise);
+          if (idx > -1) uploadQueue.splice(idx, 1);
+        });
+      uploadQueue.push(uploadPromise);
+    };
+
+    const drainOneBlob = async () => {
+      const oldest = pendingBlobs.shift();
+      const blob = await oldest.promise;
+      batch.push({ frame: oldest.frame, blob });
+    };
 
     for (let frame = 0; frame < totalFrames; frame++) {
       if (this.aborted) throw new Error('Export aborted');
@@ -110,10 +140,12 @@ export class ExportEngine {
       const audioData = analyzer.getFrame(frame);
       const time = frame / fps;
 
-      // Seek video background to matching timestamp (loop)
+      // Seek video background to matching timestamp (loop) — skip if already close
       if (videoBg && videoBg.duration > 0) {
         const targetTime = time % videoBg.duration;
-        await seekVideo(videoBg, targetTime);
+        if (Math.abs(videoBg.currentTime - targetTime) > SEEK_TOLERANCE) {
+          await seekVideo(videoBg, targetTime);
+        }
       }
 
       // Render theme
@@ -124,29 +156,30 @@ export class ExportEngine {
         drawTitleOverlay(ctx, settings, time, duration, width, height);
       }
 
-      // Convert to blob
-      const blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
-      batch.push({ frame, blob });
+      // Subtitles
+      if (settings.showSubtitles && settings.subtitleData) {
+        drawSubtitles(ctx, settings.subtitleData, time, width, height, settings.showSecondaryLang);
+      }
 
-      if (batch.length >= BATCH_SIZE || frame === totalFrames - 1) {
-        // Wait if too many concurrent uploads
-        while (uploadQueue.length >= MAX_CONCURRENT_UPLOADS) {
-          await Promise.race(uploadQueue);
+      // Kick off blob conversion WITHOUT awaiting — spec says convertToBlob snapshots
+      // the canvas at call time, so next frame's render won't corrupt this blob.
+      // The encode runs on a browser-internal thread while we render the next frame.
+      const promise = canvas.convertToBlob({ type: 'image/jpeg', quality: JPEG_QUALITY });
+      pendingBlobs.push({ frame, promise });
+
+      // Keep pipeline depth bounded — drain oldest when full
+      if (pendingBlobs.length >= BLOB_PIPELINE_DEPTH) {
+        await drainOneBlob();
+      }
+
+      // Flush a full batch (drain remaining pipeline first)
+      if (batch.length + pendingBlobs.length >= BATCH_SIZE || frame === totalFrames - 1) {
+        while (pendingBlobs.length > 0 && (batch.length < BATCH_SIZE || frame === totalFrames - 1)) {
+          await drainOneBlob();
         }
-
-        const currentBatch = batch;
-        const currentBatchIndex = batchIndex;
-        batch = [];
-        batchIndex++;
-
-        // Start upload (non-blocking)
-        const uploadPromise = this._uploadBatch(sessionId, currentBatch, currentBatchIndex)
-          .then(() => {
-            // Remove self from queue when done
-            const idx = uploadQueue.indexOf(uploadPromise);
-            if (idx > -1) uploadQueue.splice(idx, 1);
-          });
-        uploadQueue.push(uploadPromise);
+        if (batch.length >= BATCH_SIZE || frame === totalFrames - 1) {
+          await flushBatch(frame === totalFrames - 1);
+        }
 
         // Progress with ETA
         const elapsed = (performance.now() - startTime) / 1000;
@@ -156,6 +189,14 @@ export class ExportEngine {
         const percent = 10 + Math.floor((frame / totalFrames) * 75);
         onProgress(percent, `Frame ${frame + 1}/${totalFrames} (~${etaStr} left)`);
       }
+    }
+
+    // Drain any remaining blobs and flush last batch
+    while (pendingBlobs.length > 0) {
+      await drainOneBlob();
+    }
+    if (batch.length > 0) {
+      await flushBatch(true);
     }
 
     // Wait for all remaining uploads

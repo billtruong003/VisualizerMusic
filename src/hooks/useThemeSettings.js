@@ -16,6 +16,10 @@ const BASE_SETTINGS = {
   titlePosition: 'bottom-left',
   titleDisplay: 'always',
   titleFont: 'Outfit',
+  // Subtitles
+  showSubtitles: false,
+  showSecondaryLang: true,
+  subtitleData: null,  // { defaults, cues } | null
 };
 
 const FONT_OPTIONS = [
@@ -55,7 +59,7 @@ export function useThemeSettings() {
         ...BASE_SETTINGS,
         ...meta.defaultSettings,
         colors: buildDefaultColors(meta),
-        // Preserve user's visual controls and title settings across theme changes
+        // Preserve user's visual controls, title and subtitle settings across theme changes
         waveformScale: prev.waveformScale,
         barScale: prev.barScale,
         showTitle: prev.showTitle,
@@ -64,6 +68,9 @@ export function useThemeSettings() {
         titlePosition: prev.titlePosition,
         titleDisplay: prev.titleDisplay,
         titleFont: prev.titleFont,
+        showSubtitles: prev.showSubtitles,
+        showSecondaryLang: prev.showSecondaryLang,
+        subtitleData: prev.subtitleData,
       }));
     }
   }, [themeId]);

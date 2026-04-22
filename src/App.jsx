@@ -7,6 +7,7 @@ import { useAudioPlayer } from './hooks/useAudioPlayer.js';
 import { useExport } from './hooks/useExport.js';
 import { useThemeSettings } from './hooks/useThemeSettings.js';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.js';
+import { parseSubtitleJSON, SUBTITLE_SAMPLE } from './utils/subtitles.js';
 import './styles/app.css';
 
 export default function App() {
@@ -15,6 +16,9 @@ export default function App() {
   const [bgImage, setBgImage] = useState(null);
   const [showColors, setShowColors] = useState(false);
   const [showTitle, setShowTitle] = useState(false);
+  const [showSubs, setShowSubs] = useState(false);
+  const [subtitleFileName, setSubtitleFileName] = useState('');
+  const [subtitleError, setSubtitleError] = useState('');
 
   const canvasRef = useRef(null);
 
@@ -72,6 +76,36 @@ export default function App() {
     return () => URL.revokeObjectURL(url);
   }, [imageFile]);
 
+  const handleSubtitleFile = useCallback(async (file) => {
+    if (!file) return;
+    setSubtitleFileName(file.name);
+    setSubtitleError('');
+    try {
+      const text = await file.text();
+      const json = JSON.parse(text);
+      const parsed = parseSubtitleJSON(json);
+      updateSetting('subtitleData', parsed);
+      updateSetting('showSubtitles', true);
+    } catch (err) {
+      setSubtitleError(err.message || 'Invalid JSON');
+      updateSetting('subtitleData', null);
+    }
+  }, [updateSetting]);
+
+  const handleSubtitleClear = useCallback(() => {
+    setSubtitleFileName('');
+    setSubtitleError('');
+    updateSetting('subtitleData', null);
+    updateSetting('showSubtitles', false);
+  }, [updateSetting]);
+
+  const handleCopySample = useCallback(() => {
+    const text = JSON.stringify(SUBTITLE_SAMPLE, null, 2);
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }
+  }, []);
+
   const handleExport = useCallback(() => {
     if (isPlaying) stop();
     startExport({ audioFile, bgImage, theme, settings });
@@ -82,6 +116,8 @@ export default function App() {
     setAudioFile(null);
     setImageFile(null);
     setBgImage(null);
+    setSubtitleFileName('');
+    setSubtitleError('');
     resetAll();
     resetExport();
   }, [isPlaying, stop, resetAll, resetExport]);
@@ -233,6 +269,75 @@ export default function App() {
                     <option value="hidden">Hidden</option>
                   </select>
                 </div>
+              </div>
+            )}
+          </section>
+
+          {/* Subtitles (JSON-driven) */}
+          <section className="panel">
+            <div className="panel-header panel-header-toggle" onClick={() => setShowSubs(!showSubs)}>
+              <span>Subtitles (JSON)</span>
+              <span className="toggle-icon">{showSubs ? '▲' : '▼'}</span>
+            </div>
+            {showSubs && (
+              <div className="panel-body">
+                <DropZone
+                  label="Drop subtitle JSON"
+                  accept=".json,application/json"
+                  icon="&#128172;"
+                  onFileSelect={handleSubtitleFile}
+                  currentFile={subtitleFileName ? { name: subtitleFileName, size: 0 } : null}
+                />
+                {subtitleError && (
+                  <p style={{ color: '#ff6b6b', fontSize: 12, margin: '8px 0' }}>
+                    Parse error: {subtitleError}
+                  </p>
+                )}
+                {settings.subtitleData && (
+                  <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '8px 0' }}>
+                    Loaded {settings.subtitleData.cues.length} cues
+                  </p>
+                )}
+                <label className="input-row">
+                  <span className="input-label">Show on video</span>
+                  <input
+                    type="checkbox"
+                    className="toggle-checkbox"
+                    checked={settings.showSubtitles || false}
+                    disabled={!settings.subtitleData}
+                    onChange={(e) => updateSetting('showSubtitles', e.target.checked)}
+                  />
+                </label>
+                <label className="input-row">
+                  <span className="input-label">Show secondary language</span>
+                  <input
+                    type="checkbox"
+                    className="toggle-checkbox"
+                    checked={settings.showSecondaryLang !== false}
+                    disabled={!settings.subtitleData}
+                    onChange={(e) => updateSetting('showSecondaryLang', e.target.checked)}
+                  />
+                </label>
+                {settings.subtitleData && (
+                  <button className="btn btn-ghost" onClick={handleSubtitleClear} style={{ marginTop: 8 }}>
+                    Clear subtitles
+                  </button>
+                )}
+                <details style={{ marginTop: 10 }}>
+                  <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--text-muted)' }}>
+                    Sample JSON format
+                  </summary>
+                  <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '6px 0' }}>
+                    Effects: fade, slide-up/down/left/right, typewriter, pop, glow-pulse. Combine with "+".
+                    Positions: 9-grid (top/middle/bottom + left/center/right).
+                  </p>
+                  <button className="btn btn-ghost" onClick={handleCopySample} style={{ fontSize: 11 }}>
+                    Copy sample JSON
+                  </button>
+                  <pre style={{ fontSize: 10, maxHeight: 180, overflow: 'auto', background: 'rgba(0,0,0,0.3)', padding: 8, borderRadius: 4, marginTop: 6 }}>
+{JSON.stringify(SUBTITLE_SAMPLE, null, 2)}
+                  </pre>
+                </details>
               </div>
             )}
           </section>
